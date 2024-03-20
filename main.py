@@ -83,7 +83,8 @@ def upload_to_firebase(file_path):
     name = str(time.time()) + ".mp4"
     blob = bucket.blob(name)
     blob.upload_from_filename(file_path)
-    video_url = blob.public_url
+    # video_url = blob.public_url
+    video_url = f"https://firebasestorage.googleapis.com/v0/b/{bucket.name}/o/{name}?alt=media"
     print(f"File {file_path} uploaded to Firebase Storage.")
 
 
@@ -274,6 +275,45 @@ def detect_emotion_and_gaze(frame):
     return frame
 
 
+def detect_emotion_and_gaze_real(frame):
+    global start_time, emotion_times, blink_count, time_left, time_right, time_center, last_time
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+
+    current_time = time.time()
+    time_delta = current_time - last_time
+    last_time = current_time
+
+    for (x, y, w, h) in faces:
+        face = gray[y:y+h, x:x+w]
+        emotion = predict_emotion(face)
+        emotion_times[emotion] += time_delta
+
+        gaze.refresh(frame)
+
+        text = ""
+        if gaze.is_blinking():
+            text = "Blinking"
+            blink_count += time_delta
+
+        elif gaze.is_right():
+            text = "Looking right"
+            time_right += time_delta
+
+        elif gaze.is_left():
+            text = "Looking left"
+            time_left += time_delta
+
+        elif gaze.is_center():
+            text = "Looking center"
+            time_center += time_delta
+
+        start_time = time.time()
+
+    return frame
+
+
 def generate():
     global cap, start_time, og_time, result, audio_format, channels, audio_rate, device_index, chunk, audio_out, audio_times
     og_time = time.time()
@@ -301,9 +341,41 @@ def generate():
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
 
+def generate_real():
+    global cap, start_time, og_time, result, audio_format, channels, audio_rate, device_index, chunk, audio_out, audio_times
+    og_time = time.time()
+    # Start recording threads
+    audio_thread = threading.Thread(target=record_audio)
+    video_thread = threading.Thread(target=record_video)
+
+    audio_thread.start()
+    video_thread.start()
+
+    # Wait for threads to finish
+    # audio_thread.join()
+    video_thread.join()
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame = detect_emotion_and_gaze_real(frame)
+        result.write(frame)
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        frame_times.append(time.time())
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+
 @app.route('/video_feed')
 def video_feed():
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame', headers={"Access-Control-Allow-Origin": "*"})
+
+
+@app.route('/video_feed_real')
+def video_feed_real():
+    return Response(generate_real(), mimetype='multipart/x-mixed-replace; boundary=frame', headers={"Access-Control-Allow-Origin": "*"})
 
 
 @app.route('/close_camera')
@@ -342,7 +414,7 @@ def close_camera():
         # Reset variables
         start_time = None
         emotion_times = {emotion: 0 for emotion in emotions}
-        upload_to_firebase(file_path="output_with_audio.mp4")  # Change to mp4
+        upload_to_firebase(file_path="output_with_audio.mp4")
         total_gaze_time = time_center + time_left + time_right
         # Return additional information
         return jsonify({
