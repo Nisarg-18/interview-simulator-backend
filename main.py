@@ -125,6 +125,7 @@ def personality_detection(text):
             "Agreeableness": 0.0,
             "Conscientiousness": 0.0,
             "Openness": 0.0,
+            "text": text
         }
     else:
 
@@ -148,7 +149,7 @@ def personality_detection(text):
             "Neuroticism": float(pred_label[0][1]),
             "Agreeableness": float(pred_label[0][2]),
             "Conscientiousness": float(pred_label[0][3]),
-            "Openness": float(pred_label[0][4]), }
+            "Openness": float(pred_label[0][4]),  "text": text}
         return ret
 
 
@@ -409,20 +410,34 @@ def close_camera():
             print("Error: Output file not created or has zero size.")
 
         total_emotion_time = sum(emotion_times.values())
-        emotion_percentages = {emotion: (
-            time_spent / total_emotion_time) * 100 for emotion, time_spent in emotion_times.items()}
+        if total_emotion_time == 0:
+            # Handle the case when total_emotion_time is zero
+            emotion_percentages = {emotion: 0 for emotion in emotion_times}
+        else:
+            # Calculate emotion percentages normally
+            emotion_percentages = {emotion: (
+                time_spent / total_emotion_time) * 100 for emotion, time_spent in emotion_times.items()}
+
         # Reset variables
         start_time = None
         emotion_times = {emotion: 0 for emotion in emotions}
         upload_to_firebase(file_path="output_with_audio.mp4")
         total_gaze_time = time_center + time_left + time_right
+        if total_gaze_time == 0:
+            time_left = 0
+            time_right = 0
+            time_center = 0
+        else:
+            time_left = time_left/total_gaze_time
+            time_right = time_right/total_gaze_time
+            time_center = time_center/total_gaze_time
         # Return additional information
         return jsonify({
             "emotion_percentages": emotion_percentages,
             "total_blinks": blink_count,
-            "total_time_looking_left": (time_left/total_gaze_time) * 100,
-            "total_time_looking_right": (time_right/total_gaze_time) * 100,
-            "total_time_looking_center": (time_center/total_gaze_time) * 100,
+            "total_time_looking_left": (time_left) * 100,
+            "total_time_looking_right": (time_right) * 100,
+            "total_time_looking_center": (time_center) * 100,
             "total_time_seconds": round(time.time() - og_time, 2),
             "video_link": video_url
         })
